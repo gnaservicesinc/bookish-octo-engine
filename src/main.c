@@ -34,27 +34,16 @@ int main(int argc, char *argv[]) {
     }
     fclose(image_file);
 
-    // Initialize noodlenet
-    noodlenet_t *net = noodlenet_load(model_path);
-    if (!net) {
-        fprintf(stderr, "Error: Failed to load model from '%s'\n", model_path);
-        return EXIT_FAILURE;
-    }
+    // Process the image using noodlenet_predict
+    int result = noodlenet_predict(model_path, image_path);
 
-    // Process the image
-    int result = noodlenet_process_image(net, image_path);
-    
     if (result < 0) {
         fprintf(stderr, "Error: Failed to process image '%s'\n", image_path);
-        noodlenet_free(net);
         return EXIT_FAILURE;
     }
 
     // Output the result
     printf("%s\n", result ? "true" : "false");
 
-    // Clean up
-    noodlenet_free(net);
-    
     return EXIT_SUCCESS;
 }

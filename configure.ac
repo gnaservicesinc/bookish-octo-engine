@@ -7,12 +7,13 @@ AC_CONFIG_FILES([
  src/Makefile
 ])
 
-# Check for libnoodlenet
-AC_CHECK_LIB([noodlenet], [noodlenet_load], [], [
-  AC_MSG_ERROR([libnoodlenet is required but not found])
-])
-AC_CHECK_HEADERS([noodlenet.h], [], [
-  AC_MSG_ERROR([noodlenet.h is required but not found])
+# Check for pkg-config
+PKG_PROG_PKG_CONFIG
+
+# Check for libnoodlenet using pkg-config
+PKG_CHECK_MODULES([NOODLENET], [libnoodlenet >= 1.0], [], [
+  AC_MSG_ERROR([libnoodlenet >= 1.0 is required but not found.
+  Please make sure libnoodlenet is installed and pkg-config can find it.])
 ])
 
 AC_OUTPUT
