@@ -1,0 +1,41 @@
+# Autotools generated files
+Makefile
+Makefile.in
+aclocal.m4
+autom4te.cache/
+compile
+config.h
+config.h.in
+config.log
+config.status
+configure
+depcomp
+install-sh
+missing
+.deps/
+.dirstamp
+stamp-h1
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+bookish-octo-engine
+
+# macOS specific
+.DS_Store
