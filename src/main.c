@@ -23,13 +23,14 @@ typedef struct {
     int vis_scale;    // 0=minmax, 1=symmetric-zero
     int vis_bias;     // 0/1 include biases
     int vis_stats;    // 0/1 include stats
+    int vis_raw;      // 0/1 raw non-square weights
 } AppState;
 
 static void clear_state(AppState* s) {
     if (s->model) { nn_model_free(s->model); s->model = NULL; }
     s->steps = 100; s->batch_size = 10; s->learning_rate = 0.01f; s->l1_lambda = 0.0f; s->l2_lambda = 0.0f;
     s->pos_dir[0] = s->neg_dir[0] = s->val_dir[0] = '\0';
-    s->vis_mode = 0; s->vis_scale = 0; s->vis_bias = 0; s->vis_stats = 0;
+    s->vis_mode = 0; s->vis_scale = 0; s->vis_bias = 0; s->vis_stats = 0; s->vis_raw = 0;
 }
 
 static void pause_enter() {
@@ -208,11 +209,11 @@ static void action_test_model(const AppState* s) {
 static void action_export_visuals(const AppState* s) {
     if (!s->model) { printf("No model defined/loaded.\n"); return; }
     char out[1024]; read_line("Output directory: ", out, sizeof(out));
-    NN_VisOptions opts; opts.mode = (s->vis_mode==0)?NN_VIS_MODE_WEIGHTS:NN_VIS_MODE_HEATMAP; opts.scale = (s->vis_scale==0)?NN_VIS_SCALE_MINMAX:NN_VIS_SCALE_SYM_ZERO; opts.include_bias = s->vis_bias; opts.include_stats = s->vis_stats;
+    NN_VisOptions opts; opts.mode = (s->vis_mode==0)?NN_VIS_MODE_WEIGHTS:NN_VIS_MODE_HEATMAP; opts.scale = (s->vis_scale==0)?NN_VIS_SCALE_MINMAX:NN_VIS_SCALE_SYM_ZERO; opts.include_bias = s->vis_bias; opts.include_stats = s->vis_stats; opts.raw_weights_full = s->vis_raw;
     int rc = nn_export_layer_visualizations_ex(s->model, out, &opts);
-    if (rc==0) printf("Exports written to %s (PGM files). mode=%s, scale=%s, biases=%s, stats=%s\n", out,
+    if (rc==0) printf("Exports written to %s (PGM files). mode=%s, scale=%s, biases=%s, stats=%s, raw=%s\n", out,
                      s->vis_mode==0?"weights":"heatmap", s->vis_scale==0?"minmax":"symzero",
-                     s->vis_bias?"on":"off", s->vis_stats?"on":"off");
+                     s->vis_bias?"on":"off", s->vis_stats?"on":"off", s->vis_raw?"on":"off");
     else printf("Export failed.\n");
 }
 
@@ -221,9 +222,10 @@ static void action_configure_vis(AppState* s) {
     printf("Scaling (0=minmax,1=symmetric zero-centered) [%d]: ", s->vis_scale); if (fgets(line,sizeof(line),stdin)) { int v=atoi(line); if (v==0||v==1) s->vis_scale=v; }
     printf("Include biases (0/1) [%d]: ", s->vis_bias); if (fgets(line,sizeof(line),stdin)) { int v=atoi(line); if (v==0||v==1) s->vis_bias=v; }
     printf("Include stats (0/1) [%d]: ", s->vis_stats); if (fgets(line,sizeof(line),stdin)) { int v=atoi(line); if (v==0||v==1) s->vis_stats=v; }
-    printf("Updated: mode=%s, scale=%s, biases=%s, stats=%s\n",
+    printf("Raw weights non-square (0/1) [%d]: ", s->vis_raw); if (fgets(line,sizeof(line),stdin)) { int v=atoi(line); if (v==0||v==1) s->vis_raw=v; }
+    printf("Updated: mode=%s, scale=%s, biases=%s, stats=%s, raw=%s\n",
            s->vis_mode==0?"weights":"heatmap", s->vis_scale==0?"minmax":"symzero",
-           s->vis_bias?"on":"off", s->vis_stats?"on":"off");
+           s->vis_bias?"on":"off", s->vis_stats?"on":"off", s->vis_raw?"on":"off");
 }
 
 int main(void) {
