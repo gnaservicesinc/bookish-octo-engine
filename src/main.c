@@ -9,12 +9,15 @@
 
 typedef struct {
     NN_Model* model;
+    int model_locked; // locked after load or first training
+    int dirty_since_save;
     // Training config
     int steps;
     int batch_size;
     float learning_rate;
     float l1_lambda;
     float l2_lambda;
+    int shuffle; // 0/1
     char pos_dir[1024];
     char neg_dir[1024];
     char val_dir[1024];
@@ -28,7 +31,8 @@ typedef struct {
 
 static void clear_state(AppState* s) {
     if (s->model) { nn_model_free(s->model); s->model = NULL; }
-    s->steps = 100; s->batch_size = 10; s->learning_rate = 0.01f; s->l1_lambda = 0.0f; s->l2_lambda = 0.0f;
+    s->model_locked = 0; s->dirty_since_save = 0;
+    s->steps = 100; s->batch_size = 10; s->learning_rate = 0.01f; s->l1_lambda = 0.0f; s->l2_lambda = 0.0f; s->shuffle = 1;
     s->pos_dir[0] = s->neg_dir[0] = s->val_dir[0] = '\0';
     s->vis_mode = 0; s->vis_scale = 0; s->vis_bias = 0; s->vis_stats = 0; s->vis_raw = 0;
 }
@@ -101,6 +105,7 @@ static void action_set_optimizer(AppState* s) {
 }
 
 static void action_define_model(AppState* s) {
+    if (s->model_locked) { printf("Model is locked (loaded or trained). Start a new process to define a new model.\n"); return; }
     if (s->model) { nn_model_free(s->model); s->model = NULL; }
     int input = 512*512; int output = 1;
     char line[128];
@@ -120,7 +125,7 @@ static void action_define_model(AppState* s) {
     ActivationFunction out_act = ask_activation("Output activation");
     s->model = nn_model_create(input, sizes, num_hidden, output, acts, out_act);
     free(sizes); free(acts);
-    if (s->model) printf("Model created.\n"); else printf("Failed to create model.\n");
+    if (s->model) { printf("Model created.\n"); s->dirty_since_save = 1; } else printf("Failed to create model.\n");
 }
 
 static void action_define_training(AppState* s) {
@@ -130,6 +135,7 @@ static void action_define_training(AppState* s) {
     printf("Learning rate: "); if (fgets(line, sizeof(line), stdin)) s->learning_rate = (float)atof(line);
     printf("L1 lambda (0 for off): "); if (fgets(line, sizeof(line), stdin)) s->l1_lambda = (float)atof(line);
     printf("L2 lambda (0 for off): "); if (fgets(line, sizeof(line), stdin)) s->l2_lambda = (float)atof(line);
+    printf("Shuffle each epoch? [1=yes,0=no]: "); if (fgets(line, sizeof(line), stdin)) { int v = atoi(line); s->shuffle = (v!=0); }
     read_line("Required: Positive images dir: ", s->pos_dir, sizeof(s->pos_dir));
     if (!is_dir(s->pos_dir)) printf("Warning: directory not found.\n");
     read_line("Optional: Negative images dir (empty to skip): ", s->neg_dir, sizeof(s->neg_dir));
@@ -143,10 +149,12 @@ static void action_run_training(AppState* s) {
     if (!s->pos_dir[0]) { printf("Define training task with positive images first.\n"); return; }
     float last_loss = 0.0f, val_loss = 0.0f;
     int rc = nn_train_from_dirs(s->model, s->pos_dir, s->neg_dir[0]?s->neg_dir:NULL, s->val_dir[0]?s->val_dir:NULL,
-                                s->steps, s->batch_size, s->learning_rate, s->l1_lambda, s->l2_lambda, &last_loss, &val_loss);
+                                s->steps, s->batch_size, s->shuffle, s->learning_rate, s->l1_lambda, s->l2_lambda, &last_loss, &val_loss);
     if (rc == 0) {
         if (s->val_dir[0]) printf("Training complete. Last loss: %.6f, Val loss: %.6f\n", last_loss, val_loss);
         else printf("Training complete. Last loss: %.6f\n", last_loss);
+        s->model_locked = 1;
+        s->dirty_since_save = 1;
     }
     else printf("Training failed.\n");
 }
@@ -154,8 +162,11 @@ static void action_run_training(AppState* s) {
 static void action_save_model(AppState* s) {
     if (!s->model) { printf("No model to save.\n"); return; }
     char path[1024]; read_line("Save to path (.senm): ", path, sizeof(path));
+    // Persist metadata
+    (void)nn_model_set_data_dirs(s->model, s->pos_dir[0]?s->pos_dir:NULL, s->neg_dir[0]?s->neg_dir:NULL, s->val_dir[0]?s->val_dir:NULL);
+    (void)nn_model_set_locked_training_params(s->model, s->batch_size, s->learning_rate, s->shuffle, NN_OPTIMIZER_SGD);
     int rc = nn_model_save(s->model, path);
-    if (rc == 0) printf("Saved to %s\n", path); else printf("Failed to save.\n");
+    if (rc == 0) { printf("Saved to %s\n", path); s->dirty_since_save = 0; } else printf("Failed to save.\n");
 }
 
 static void action_load_model(AppState* s) {
@@ -163,7 +174,14 @@ static void action_load_model(AppState* s) {
     NN_Model* m = nn_model_load(path);
     if (!m) { printf("Failed to load model.\n"); return; }
     if (s->model) nn_model_free(s->model);
-    s->model = m; printf("Model loaded.\n");
+    s->model = m; s->model_locked = 1; s->dirty_since_save = 0; printf("Model loaded.\n");
+    // Load stored data dirs if present
+    const char *p=NULL, *n=NULL, *v=NULL;
+    if (nn_model_get_data_dirs(s->model, &p, &n, &v) == 0) {
+        if (p) strncpy(s->pos_dir, p, sizeof(s->pos_dir)-1);
+        if (n) strncpy(s->neg_dir, n, sizeof(s->neg_dir)-1);
+        if (v) strncpy(s->val_dir, v, sizeof(s->val_dir)-1);
+    }
 }
 
 static const char* act_name(ActivationFunction a) {
@@ -183,6 +201,9 @@ static void action_inspect_model(const AppState* s) {
         printf("  Hidden %d: size=%d, act=%s\n", i+1, nn_model_hidden_size(s->model,i), act_name(nn_model_hidden_activation(s->model,i)));
     }
     printf("  Output act: %s\n", act_name(nn_model_output_activation(s->model)));
+    const char *p=NULL,*n=NULL,*v=NULL; if (nn_model_get_data_dirs(s->model,&p,&n,&v)==0) {
+        printf("Data dirs: pos=%s, neg=%s, val=%s\n", p?p:"(none)", n?n:"(none)", v?v:"(none)");
+    }
 }
 
 static int list_images(const char* dir, char*** out, int* n) {
